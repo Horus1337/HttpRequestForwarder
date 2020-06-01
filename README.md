@@ -6,7 +6,7 @@ I needed a Resource, that can be used by a Jetty, that will forward the complete
 It was more complicated then anticipated, that's why I thought I'd share it.
 
     import java.io.IOException;
-    import java.nio.charset.StandardCharsets;
+    import java.io.InputStream;
     import java.util.Map;
     
     import javax.servlet.ServletException;
@@ -21,12 +21,14 @@ It was more complicated then anticipated, that's why I thought I'd share it.
     import org.slf4j.LoggerFactory;
     
     import com.fasterxml.jackson.databind.ObjectMapper;
+    import com.google.common.io.ByteStreams;
     
-    public class Redirector extends HttpServlet {
-        private static final Logger logger = LoggerFactory.getLogger(Redirector.class);
+    public class RequestForwarder extends HttpServlet {
+        private static final Logger logger = LoggerFactory.getLogger(RequestForwarder.class);
+        private static final String prefix = "relay";
         private final WebTarget webTarget;
     
-        Redirector(WebTarget webTarget) {
+        RequestForwarder(WebTarget webTarget) {
             this.webTarget = webTarget;
         }
     
@@ -34,27 +36,31 @@ It was more complicated then anticipated, that's why I thought I'd share it.
         protected void service(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
             String path = request.getPathInfo().replace("//", "/");
     
-            WebTarget currentTarget = webTarget.path("relay" + path);
+            WebTarget currentTarget = webTarget.path(prefix + path);
             Map<String, String[]> parameterMap = request.getParameterMap();
-            for (Map.Entry<String, String[]> entry : parameterMap.entrySet()) {
-                currentTarget = currentTarget.queryParam(entry.getKey(), entry.getValue());
+            for (var entry : parameterMap.entrySet()) {
+                currentTarget = currentTarget.queryParam(entry.getKey(), (Object[]) entry.getValue());
             }
-            String lotusResponse;
+    
+            InputStream relayResponse;
             if ("POST".equals(request.getMethod())) {
-                lotusResponse = currentTarget.request(MediaType.APPLICATION_JSON)
+                relayResponse = currentTarget.request(MediaType.APPLICATION_JSON)
+                                             .accept(MediaType.APPLICATION_OCTET_STREAM)
                                              .post(Entity.json(new ObjectMapper().readValue(request.getInputStream(), Object.class)))
-                                             .readEntity(String.class);
+                                             .readEntity(InputStream.class);
             } else if ("PUT".equals(request.getMethod())) {
-                lotusResponse = currentTarget.request(MediaType.APPLICATION_JSON)
+                relayResponse = currentTarget.request(MediaType.APPLICATION_JSON)
+                                             .accept(MediaType.APPLICATION_OCTET_STREAM)
                                              .put(Entity.json(new ObjectMapper().readValue(request.getInputStream(), Object.class)))
-                                             .readEntity(String.class);
+                                             .readEntity(InputStream.class);
             } else {
-                lotusResponse = currentTarget.request(MediaType.APPLICATION_JSON)
+                relayResponse = currentTarget.request(MediaType.APPLICATION_JSON)
+                                             .accept(MediaType.APPLICATION_OCTET_STREAM)
                                              .build(request.getMethod())
                                              .invoke()
-                                             .readEntity(String.class);
+                                             .readEntity(InputStream.class);
             }
-            response.getOutputStream().write(lotusResponse.getBytes(StandardCharsets.UTF_8));
+            ByteStreams.copy(relayResponse, response.getOutputStream());
         }
     }
     
